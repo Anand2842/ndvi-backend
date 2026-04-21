@@ -16,3 +16,4 @@ ENV/
 test*.py
 *.png
 debug*.py
+models/

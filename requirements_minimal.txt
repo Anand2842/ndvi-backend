@@ -4,7 +4,7 @@
 torch==2.5.1+cpu
 torchvision==0.20.1+cpu
 
-# Core dependencies only
+# Core dependencies
 numpy==1.26.4
 Pillow==10.4.0
 opencv-python-headless==4.10.0.84
@@ -16,3 +16,6 @@ matplotlib==3.9.2
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 python-multipart==0.0.12
+
+# Model download from Hugging Face
+huggingface_hub==0.26.5

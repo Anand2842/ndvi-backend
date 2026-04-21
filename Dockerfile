@@ -15,12 +15,15 @@ COPY requirements_minimal.txt .
 RUN pip install --no-cache-dir -r requirements_minimal.txt
 
 # Copy only essential files
-COPY api_server.py .
+COPY main.py .
 COPY model.py .
-COPY models/ models/
+COPY download_model.py .
+
+# Create models directory (model will be downloaded on startup)
+RUN mkdir -p models
 
 # Expose port
 EXPOSE 8000
 
-# Start server
-CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start server (Railway uses $PORT environment variable)
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
