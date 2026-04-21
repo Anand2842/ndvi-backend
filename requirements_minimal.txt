@@ -1,0 +1,18 @@
+# Ultra-minimal requirements for Railway (<4GB image)
+# PyTorch CPU-only - latest stable version
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+
+# Core dependencies only
+numpy==1.26.4
+Pillow==10.4.0
+opencv-python-headless==4.10.0.84
+
+# Minimal visualization
+matplotlib==3.9.2
+
+# FastAPI backend
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12

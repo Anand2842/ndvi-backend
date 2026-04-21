@@ -1,0 +1,42 @@
+═══════════════════════════════════════════════════════════════
+                    DEPLOYMENT COMMANDS
+═══════════════════════════════════════════════════════════════
+
+1. GO TO DIRECTORY:
+   cd ~/Desktop/ndvi-backend
+
+2. INITIALIZE GIT (first time only):
+   git add .
+   git commit -m "Initial commit: Railway deployment setup"
+
+3. DEPLOY TO RAILWAY:
+   ./deploy_minimal.sh
+
+   OR manually:
+   railway login
+   railway link
+   railway up
+
+4. MONITOR DEPLOYMENT:
+   railway logs
+
+5. GET YOUR URL:
+   railway domain
+
+6. TEST API:
+   curl https://your-app.railway.app/
+
+═══════════════════════════════════════════════════════════════
+                    TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════
+
+If deployment fails:
+   railway logs --tail 100
+
+Check status:
+   railway status
+
+Redeploy:
+   railway up
+
+═══════════════════════════════════════════════════════════════

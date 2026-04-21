@@ -1,0 +1,17 @@
+# Exclude everything not needed for deployment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.git/
+.gitignore
+.vscode/
+.DS_Store
+*.md
+*.sh
+test*.py
+*.png
