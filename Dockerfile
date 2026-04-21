@@ -8,11 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements_minimal.txt .
+# Copy requirements files
+COPY requirements.txt requirements_torch.txt ./
 
-# Install Python packages with aggressive optimization
-RUN pip install --no-cache-dir -r requirements_minimal.txt
+# Install dependencies in two steps to avoid index conflicts
+# First: Install from PyPI
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Second: Install PyTorch from PyTorch index
+RUN pip install --no-cache-dir -r requirements_torch.txt
 
 # Copy only essential files
 COPY main.py .
