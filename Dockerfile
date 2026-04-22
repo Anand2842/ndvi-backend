@@ -30,4 +30,4 @@ RUN mkdir -p models
 EXPOSE 8000
 
 # Start server (Railway uses $PORT environment variable)
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["sh", "-c", "python download_model.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
