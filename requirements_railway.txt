@@ -1,0 +1,18 @@
+# Minimal requirements for Railway deployment
+# PyTorch CPU-only (much smaller than full PyTorch)
+torch==2.0.1
+torchvision==0.15.2
+
+# Image processing
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+opencv-python-headless==4.9.0.80
+scipy>=1.11.0
+
+# Visualization (minimal)
+matplotlib>=3.7.0
+
+# FastAPI backend
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6

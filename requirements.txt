@@ -1,9 +1,21 @@
-# Core dependencies from PyPI
-numpy==1.26.4
-Pillow==10.4.0
+# PyTorch for M1 Mac with MPS (Metal Performance Shaders) support
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Image processing libraries
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
 opencv-python-headless==4.9.0.80
-matplotlib==3.9.2
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-python-multipart==0.0.12
-huggingface_hub==0.26.5
+scipy>=1.11.0
+
+# Visualization and progress tracking
+matplotlib>=3.7.0
+tqdm>=4.65.0
+
+# Web interface for testing
+streamlit>=1.28.0
+
+# FastAPI backend for Next.js frontend
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6

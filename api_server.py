@@ -2,6 +2,7 @@
 FastAPI backend for NDVI.AI - Serves the Next.js frontend
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,15 +17,41 @@ from pathlib import Path
 from model import UNetGenerator
 
 # ============================================================================
+# LIFESPAN (replaces deprecated @app.on_event)
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load model on startup if available."""
+    print("🚀 Starting NDVI.AI API Server...")
+    print(f"📱 Device: {get_device()}")
+    try:
+        load_model()
+        print("✅ Model loaded successfully")
+    except FileNotFoundError as e:
+        print(f"⚠️  Model file not found: {e}")
+        print("   Server will run in fallback mode (no AI generation)")
+        print("   Upload models/generator_final.pth to enable AI features")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not load model: {e}")
+        print("   Server will run in fallback mode")
+    yield
+
+# ============================================================================
 # FASTAPI SETUP
 # ============================================================================
 
-app = FastAPI(title="NDVI.AI API", version="1.0.0")
+app = FastAPI(title="NDVI.AI API", version="1.0.0", lifespan=lifespan)
 
 # Enable CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://ndvi-frontend-iota.vercel.app",
+        "https://*.vercel.app"  # Allow all Vercel preview deployments
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,7 +85,7 @@ def load_model():
         generator = UNetGenerator(in_channels=3, out_channels=3).to(device)
         
         # Load checkpoint - handle both direct state_dict and checkpoint formats
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
         if isinstance(checkpoint, dict) and 'generator_state' in checkpoint:
             # Checkpoint format with metadata
             generator.load_state_dict(checkpoint['generator_state'])
@@ -85,37 +112,71 @@ def preprocess_image(image: Image.Image) -> torch.Tensor:
 def tensor_to_base64(tensor: torch.Tensor) -> str:
     import cv2
     import matplotlib.cm as cm
-    
-    # Convert tensor to image
+    from scipy.ndimage import median_filter
+
+    # ── Step 1: Extract model output ──────────────────
     img = tensor.squeeze(0).cpu().detach().numpy()
     img = np.transpose(img, (1, 2, 0))
     img = np.clip((img * 0.5 + 0.5), 0, 1)
-    
-    # Single channel — weighted green emphasis
-    ndvi = (0.6 * img[:,:,1] + 
-            0.2 * img[:,:,0] + 
+
+    # ── Step 2: Weighted vegetation signal ────────────
+    ndvi = (0.6 * img[:,:,1] +
+            0.2 * img[:,:,0] +
             0.2 * img[:,:,2])
-    
-    # Heavy smooth FIRST — kills the noise before coloring
-    ndvi_smooth = cv2.GaussianBlur(ndvi, (15, 15), 0)
-    
-    # Gentle contrast stretch — DO NOT use percentile clipping
-    # Just normalize to 0-1 range directly
-    mn = ndvi_smooth.min()
-    mx = ndvi_smooth.max()
-    if mx > mn:
-        ndvi_norm = (ndvi_smooth - mn) / (mx - mn)
-    else:
-        ndvi_norm = ndvi_smooth
-    
-    # Apply RdYlGn colormap
-    colormap  = cm.get_cmap('RdYlGn')
-    colored   = colormap(ndvi_norm)
-    colored   = (colored[:, :, :3] * 255).astype(np.uint8)
-    
-    # Light final smooth to blend edges
-    colored = cv2.GaussianBlur(colored, (5, 5), 0)
-    
+
+    # ── Step 3: Adaptive Masking ──────────────────────
+    # We want to heavily smooth water (to kill grid artifacts)
+    # but barely touch vegetation (to preserve fine texture/dots).
+    # Create a soft mask: 0 = water, 1 = vegetation
+    # Water in this model is typically < 0.4, land is > 0.5
+    mask = np.clip((ndvi - 0.35) / 0.15, 0, 1)
+    mask = cv2.GaussianBlur(mask.astype(np.float32), (11, 11), 0)
+
+    # ── Step 4: Water Base (Heavy Smooth) ─────────────
+    # Aggressive median to kill checkerboard, then Gaussian
+    water_base = median_filter(ndvi, size=7)
+    water_base = cv2.GaussianBlur(water_base.astype(np.float32), (21, 21), 0)
+
+    # ── Step 5: Land Base (Light Smooth) ──────────────
+    # Only a small median to kill the worst noise, preserve texture
+    land_base = median_filter(ndvi, size=3).astype(np.float32)
+
+    # ── Step 6: Blend ─────────────────────────────────
+    ndvi_blended = water_base * (1 - mask) + land_base * mask
+
+    # ── Step 7: Upscale to 1024×1024 ─────────────────
+    ndvi_big = cv2.resize(ndvi_blended, (1024, 1024),
+                          interpolation=cv2.INTER_CUBIC)
+
+    # ── Step 8: Bilateral filter ──────────────────────
+    # Sharpens boundaries between zones
+    ndvi_bilateral = cv2.bilateralFilter(
+        ndvi_big.astype(np.float32),
+        d=9,
+        sigmaColor=0.04,
+        sigmaSpace=15
+    )
+
+    # ── Step 9: Percentile-clipped normalization ─────
+    p2, p98 = np.percentile(ndvi_bilateral, [2, 98])
+    ndvi_norm = np.clip(
+        (ndvi_bilateral - p2) / (p98 - p2 + 1e-6),
+        0, 1
+    )
+
+    # ── Step 10: Apply RdYlGn colormap ────────────────
+    cmap = cm.get_cmap('RdYlGn')
+    colored = (cmap(ndvi_norm)[:,:,:3] * 255).astype(np.uint8)
+
+    # ── Step 11: Saturation + brightness boost ────────
+    hsv = cv2.cvtColor(colored, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:,:,1] = np.clip(hsv[:,:,1] * 1.8, 0, 255)   # +80% saturation
+    hsv[:,:,2] = np.clip(hsv[:,:,2] * 1.15, 0, 255)   # +15% brightness
+    colored = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+
+    # ── Step 12: Light final smooth ──────────────────
+    colored = cv2.GaussianBlur(colored, (3, 3), 0)
+
     buf = io.BytesIO()
     Image.fromarray(colored).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
@@ -197,49 +258,74 @@ async def analyze_image(file: UploadFile = File(...)):
         JSON with original image, NDVI image, and health metrics
     """
     try:
-        # Load model
-        model = load_model()
-        
-        # Read and validate image
+        # Read and validate image first
         contents = await file.read()
         try:
             rgb_image = Image.open(io.BytesIO(contents)).convert('RGB')
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
         
-        # Process image
-        rgb_tensor = preprocess_image(rgb_image).to(device)
-        
-        # Generate NDVI
-        with torch.no_grad():
-            ndvi_tensor = model(rgb_tensor)
-        
-        # Convert NDVI tensor to smooth base64 image
-        ndvi_b64 = tensor_to_base64(ndvi_tensor)
-        
-        # Resize original to match output and convert to base64
+        # Resize original to match output
         rgb_image_resized = rgb_image.resize((256, 256))
         original_b64 = image_to_base64(rgb_image_resized)
         
-        # For health metrics, we need to decode the NDVI image
-        ndvi_image_bytes = base64.b64decode(ndvi_b64)
-        ndvi_image = Image.open(io.BytesIO(ndvi_image_bytes))
-        health_metrics = calculate_health_metrics(ndvi_image)
+        # Try to load model and generate NDVI
+        try:
+            model = load_model()
+            
+            # Process image
+            rgb_tensor = preprocess_image(rgb_image).to(device)
+            
+            # Generate NDVI
+            with torch.no_grad():
+                ndvi_tensor = model(rgb_tensor)
+            
+            # Convert NDVI tensor to smooth base64 image
+            ndvi_b64 = tensor_to_base64(ndvi_tensor)
+            
+            # For health metrics, we need to decode the NDVI image
+            ndvi_image_bytes = base64.b64decode(ndvi_b64)
+            ndvi_image = Image.open(io.BytesIO(ndvi_image_bytes))
+            health_metrics = calculate_health_metrics(ndvi_image)
+            
+            return JSONResponse({
+                "success": True,
+                "original_image": original_b64,
+                "ndvi_image": ndvi_b64,
+                "health": health_metrics,
+                "model_info": {
+                    "name": "Pix2Pix U-Net Generator",
+                    "accuracy": "~86.6% (approximate NDVI)",
+                    "trained_on": "2,200 Sentinel-2 image pairs"
+                }
+            })
+            
+        except FileNotFoundError:
+            # Graceful fallback: model not available
+            return JSONResponse({
+                "success": True,
+                "original_image": original_b64,
+                "ndvi_image": original_b64,  # Return original as fallback
+                "health": {
+                    "score": 0,
+                    "status": "Model Not Available",
+                    "message": "Backend is running but AI model is not loaded. Displaying original image. To enable AI-powered NDVI analysis, upload the model file to the server.",
+                    "color": "gray",
+                    "zones": {
+                        "healthy": 0,
+                        "moderate": 0,
+                        "stressed": 0
+                    }
+                },
+                "model_info": {
+                    "name": "Fallback Mode (No AI)",
+                    "accuracy": "N/A - Model file not found",
+                    "trained_on": "Model not loaded"
+                }
+            })
         
-        return JSONResponse({
-            "success": True,
-            "original_image": original_b64,
-            "ndvi_image": ndvi_b64,
-            "health": health_metrics,
-            "model_info": {
-                "name": "Pix2Pix U-Net Generator",
-                "accuracy": "~86.6% (approximate NDVI)",
-                "trained_on": "2,200 Sentinel-2 image pairs"
-            }
-        })
-        
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
@@ -259,21 +345,7 @@ async def health_check():
         "device_available": device.type in ["mps", "cuda", "cpu"]
     }
 
-# ============================================================================
-# STARTUP
-# ============================================================================
 
-@app.on_event("startup")
-async def startup_event():
-    """Load model on startup."""
-    print("🚀 Starting NDVI.AI API Server...")
-    print(f"📱 Device: {device}")
-    try:
-        load_model()
-        print("✅ Model loaded successfully")
-    except Exception as e:
-        print(f"⚠️  Warning: Could not load model: {e}")
-        print("   Model will be loaded on first request")
 
 if __name__ == "__main__":
     import uvicorn
