@@ -26,5 +26,6 @@ RUN mkdir -p models
 # Expose port
 EXPOSE 8000
 
-# Start server - sh -c expands $PORT from Railway env
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run via Python directly — reads PORT from os.environ inside main.py
+# No shell expansion needed, no $PORT issues possible
+CMD ["python", "main.py"]
