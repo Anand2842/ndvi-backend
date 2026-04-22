@@ -1,4 +1,4 @@
-# Ultra-minimal Railway deployment - optimized for <4GB
+# Railway deployment - NDVI.AI Backend
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -12,22 +12,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt requirements_torch.txt ./
 
 # Install dependencies in two steps to avoid index conflicts
-# First: Install from PyPI
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Second: Install PyTorch from PyTorch index
 RUN pip install --no-cache-dir -r requirements_torch.txt
 
-# Copy only essential files
+# Copy application files
 COPY main.py .
 COPY model.py .
 COPY download_model.py .
 
-# Create models directory (model will be downloaded on startup)
+# Create models directory (model downloaded from HuggingFace at startup)
 RUN mkdir -p models
 
 # Expose port
 EXPOSE 8000
 
-# Start server (Railway uses $PORT environment variable)
-CMD ["sh", "-c", "python download_model.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start server - sh -c expands $PORT from Railway env
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
